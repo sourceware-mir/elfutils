@@ -1,3 +1,24 @@
+2021-05-12  Dmitry V. Levin  <ldv@altlinux.org>
+
+	* elfcompress.c (process_file): Return 1 instead of -1 in case of an
+	error.
+
+	* elfcompress.c (process_file): Remove redundant assignment in case of
+	"Nothing to do".
+
+	* elfcompress.c (process_file): Set res to 0 in case of "Nothing to do".
+
+2021-04-19  Martin Liska  <mliska@suse.cz>
+
+	* elfclassify.c (run_classify): Use startswith.
+	* elfcompress.c (process_file): Likewise.
+	* nm.c (show_symbols_sysv): Likewise.
+	* readelf.c (print_debug): Likewise.
+	(handle_notes_data): Likewise.
+	(dump_data_section): Likewise.
+	(print_string_section): Likewise.
+	* strip.c (remove_debug_relocations): Likewise.
+
 2021-04-03  Mark Wielaard  <mark@klomp.org>
 
 	* nm.c (show_symbols): close dwfl_fd if dwfl_begin fails.
