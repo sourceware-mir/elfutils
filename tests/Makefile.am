@@ -187,7 +187,8 @@ TESTS = run-arextract.sh run-arsymtest.sh run-ar.sh newfile test-nlist \
 	run-getphdrnum.sh run-test-includes.sh \
 	leb128 read_unaligned \
 	msg_tst system-elf-libelf-test \
-	$(asm_TESTS) run-disasm-bpf.sh
+	$(asm_TESTS) run-disasm-bpf.sh run-low_high_pc-dw-form-indirect.sh \
+	run-readelf-dw-form-indirect.sh
 
 if !BIARCH
 export ELFUTILS_DISABLE_BIARCH = 1
@@ -507,40 +508,42 @@ EXTRA_DIST = run-arextract.sh run-arsymtest.sh run-ar.sh \
 	     run-pt_gnu_prop-tests.sh \
 	     testfile_pt_gnu_prop.bz2 testfile_pt_gnu_prop32.bz2 \
 	     run-getphdrnum.sh testfile-phdrs.elf.bz2 \
-	     run-test-includes.sh
+	     run-test-includes.sh run-low_high_pc-dw-form-indirect.sh \
+	     run-readelf-dw-form-indirect.sh testfile-dw-form-indirect.bz2
 
 
 if USE_VALGRIND
-valgrind_cmd='valgrind -q --leak-check=full --error-exitcode=1'
+valgrind_cmd=valgrind -q --leak-check=full --error-exitcode=1
 endif
 
 
-installed_TESTS_ENVIRONMENT = libdir=$(DESTDIR)$(libdir); \
-			      bindir=$(DESTDIR)$(bindir); \
+installed_TESTS_ENVIRONMENT = libdir='$(DESTDIR)$(libdir)'; \
+			      bindir='$(DESTDIR)$(bindir)'; \
 			      LC_ALL=C; LANG=C; \
-			      VALGRIND_CMD=$(valgrind_cmd); \
-			      abs_srcdir=$(abs_srcdir); \
-			      abs_builddir=$(abs_builddir); \
-			      abs_top_builddir=$(abs_top_builddir); \
+			      VALGRIND_CMD='$(valgrind_cmd)'; \
+			      abs_srcdir='$(abs_srcdir)'; \
+			      abs_builddir='$(abs_builddir)'; \
+			      abs_top_builddir='$(abs_top_builddir)'; \
 			      export abs_srcdir; export abs_builddir; \
 			      export abs_top_builddir; \
 			      export libdir; export bindir; \
 			      export LC_ALL; export LANG; export VALGRIND_CMD; \
 			      unset DEBUGINFOD_URLS; \
-			      NM=$(NM); export NM; \
-			      CC=$(CC); export CC;
+			      NM='$(NM)'; export NM; \
+			      CC='$(CC)'; export CC;
 installed_LOG_COMPILER = $(abs_srcdir)/test-wrapper.sh \
 			 installed $(tests_rpath) \
 			 '$(program_transform_name)'
-TESTS_ENVIRONMENT = LC_ALL=C; LANG=C; VALGRIND_CMD=$(valgrind_cmd); \
-		    abs_srcdir=$(abs_srcdir);  abs_builddir=$(abs_builddir); \
-		    abs_top_builddir=$(abs_top_builddir); \
+TESTS_ENVIRONMENT = LC_ALL=C; LANG=C; VALGRIND_CMD='$(valgrind_cmd)'; \
+		    abs_srcdir='$(abs_srcdir)'; \
+		    abs_builddir='$(abs_builddir)'; \
+		    abs_top_builddir='$(abs_top_builddir)'; \
 		    export abs_srcdir; export abs_builddir; \
 		    export abs_top_builddir; \
 		    export LC_ALL; export LANG; export VALGRIND_CMD; \
 		    unset DEBUGINFOD_URLS; \
-		    NM=$(NM); export NM; \
-		    CC=$(CC); export CC;
+		    NM='$(NM)'; export NM; \
+		    CC='$(CC)'; export CC;
 LOG_COMPILER = $(abs_srcdir)/test-wrapper.sh \
 	       $(abs_top_builddir)/libdw:$(abs_top_builddir)/backends:$(abs_top_builddir)/libelf:$(abs_top_builddir)/libasm:$(abs_top_builddir)/debuginfod
 

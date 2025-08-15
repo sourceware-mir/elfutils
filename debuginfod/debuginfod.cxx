@@ -480,16 +480,9 @@ parse_opt (int key, char *arg,
       scan_archives[".rpm"]="cat"; // libarchive groks rpm natively
       break;
     case 'U':
-      if (access("/usr/bin/dpkg-deb", X_OK) == 0)
-        {
-          scan_archives[".deb"]="dpkg-deb --fsys-tarfile";
-          scan_archives[".ddeb"]="dpkg-deb --fsys-tarfile";
-        }
-      else
-        {
-          scan_archives[".deb"]="(bsdtar -O -x -f - data.tar.xz)<";
-          scan_archives[".ddeb"]="(bsdtar -O -x -f - data.tar.xz)<";
-        }
+      scan_archives[".deb"]="(bsdtar -O -x -f - data.tar\\*)<";
+      scan_archives[".ddeb"]="(bsdtar -O -x -f - data.tar\\*)<";
+      scan_archives[".ipk"]="(bsdtar -O -x -f - data.tar\\*)<";
       // .udeb too?
       break;
     case 'Z':
@@ -1580,6 +1573,46 @@ debuginfod_find_progress (debuginfod_client *, long a, long b)
 }
 
 
+// a little lru pool of debuginfod_client*s for reuse between query threads
+
+mutex dc_pool_lock;
+deque<debuginfod_client*> dc_pool;
+
+debuginfod_client* debuginfod_pool_begin()
+{
+  unique_lock<mutex> lock(dc_pool_lock);
+  if (dc_pool.size() > 0)
+    {
+      inc_metric("dc_pool_op_count","op","begin-reuse");
+      debuginfod_client *c = dc_pool.front();
+      dc_pool.pop_front();
+      return c;
+    }
+  inc_metric("dc_pool_op_count","op","begin-new");
+  return debuginfod_begin();
+}
+
+
+void debuginfod_pool_groom()
+{
+  unique_lock<mutex> lock(dc_pool_lock);
+  while (dc_pool.size() > 0)
+    {
+      inc_metric("dc_pool_op_count","op","end");
+      debuginfod_end(dc_pool.front());
+      dc_pool.pop_front();
+    }
+}
+
+
+void debuginfod_pool_end(debuginfod_client* c)
+{
+  unique_lock<mutex> lock(dc_pool_lock);
+  inc_metric("dc_pool_op_count","op","end-save");
+  dc_pool.push_front(c); // accelerate reuse, vs. push_back
+}
+
+
 static struct MHD_Response*
 handle_buildid (MHD_Connection* conn,
                 const string& buildid /* unsafe */,
@@ -1594,6 +1627,8 @@ handle_buildid (MHD_Connection* conn,
   else if (artifacttype == "source") atype_code = "S";
   else throw reportable_exception("invalid artifacttype");
 
+  inc_metric("http_requests_total", "type", artifacttype);
+  
   if (atype_code == "S" && suffix == "")
      throw reportable_exception("invalid source suffix");
 
@@ -1677,7 +1712,7 @@ handle_buildid (MHD_Connection* conn,
   // is to defer to other debuginfo servers.
 
   int fd = -1;
-  debuginfod_client *client = debuginfod_begin ();
+  debuginfod_client *client = debuginfod_pool_begin ();
   if (client != NULL)
     {
       debuginfod_set_progressfn (client, & debuginfod_find_progress);
@@ -1726,7 +1761,7 @@ handle_buildid (MHD_Connection* conn,
     }
   else
     fd = -errno; /* Set by debuginfod_begin.  */
-  debuginfod_end (client);
+  debuginfod_pool_end (client);
 
   if (fd >= 0)
     {
@@ -1897,11 +1932,25 @@ handler_cb (void * /*cls*/,
             const char * /*version*/,
             const char * /*upload_data*/,
             size_t * /*upload_data_size*/,
-            void ** /*con_cls*/)
+            void ** ptr)
 {
   struct MHD_Response *r = NULL;
   string url_copy = url;
 
+  /* libmicrohttpd always makes (at least) two callbacks: once just
+     past the headers, and one after the request body is finished
+     being received.  If we process things early (first callback) and
+     queue a response, libmicrohttpd would suppress http keep-alive
+     (via connection->read_closed = true). */
+  static int aptr; /* just some random object to use as a flag */
+  if (&aptr != *ptr)
+    {
+      /* do never respond on first call */
+      *ptr = &aptr;
+      return MHD_YES;
+    }
+  *ptr = NULL;                     /* reset when done */
+  
 #if MHD_VERSION >= 0x00097002
   enum MHD_Result rc;
 #else
@@ -1943,7 +1992,6 @@ handler_cb (void * /*cls*/,
               suffix = url_copy.substr(slash3); // include the slash in the suffix
             }
 
-          inc_metric("http_requests_total", "type", artifacttype);
           // get the resulting fd so we can report its size
           int fd;
           r = handle_buildid(connection, buildid, artifacttype, suffix, &fd);
@@ -2261,6 +2309,8 @@ elf_classify (int fd, bool &executable_p, bool &debuginfo_p, string &buildid, se
         throw elfutils_exception(rc, "getshdrstrndx");
 
       Elf_Scn *scn = NULL;
+      bool symtab_p = false;
+      bool bits_alloc_p = false;
       while (true)
         {
           scn = elf_nextscn (elf, scn);
@@ -2286,7 +2336,24 @@ elf_classify (int fd, bool &executable_p, bool &debuginfo_p, string &buildid, se
               debuginfo_p = true;
               // NB: don't break; need to parse .debug_line for sources
             }
+          else if (shdr->sh_type == SHT_SYMTAB)
+            {
+              symtab_p = true;
+            }
+          else if (shdr->sh_type != SHT_NOBITS
+                   && shdr->sh_type != SHT_NOTE
+                   && (shdr->sh_flags & SHF_ALLOC) != 0)
+            {
+              bits_alloc_p = true;
+            }
         }
+
+      // For more expansive elf/split-debuginfo classification, we
+      // want to identify as debuginfo "strip -s"-produced files
+      // without .debug_info* (like libicudata), but we don't want to
+      // identify "strip -g" executables (with .symtab left there).
+      if (symtab_p && !bits_alloc_p)
+        debuginfo_p = true;
     }
   catch (const reportable_exception& e)
     {
@@ -3087,8 +3154,6 @@ void groom()
   struct timespec ts_start, ts_end;
   clock_gettime (CLOCK_MONOTONIC, &ts_start);
 
-  database_stats_report();
-
   // scan for files that have disappeared
   sqlite_ps files (db, "check old files", "select s.mtime, s.file, f.name from "
                        BUILDIDS "_file_mtime_scanned s, " BUILDIDS "_files f "
@@ -3152,6 +3217,7 @@ void groom()
 
   sqlite3_db_release_memory(db); // shrink the process if possible
   sqlite3_db_release_memory(dbq); // ... for both connections
+  debuginfod_pool_groom(); // and release any debuginfod_client objects we've been holding onto
 
   fdcache.limit(0,0); // release the fdcache contents
   fdcache.limit(fdcache_fds,fdcache_mbs); // restore status quo parameters
@@ -3479,23 +3545,35 @@ main (int argc, char *argv[])
   if (rc)
     error (EXIT_FAILURE, rc, "cannot spawn thread to groom database\n");
   else
-    all_threads.push_back(pt);
+    {
+#ifdef HAVE_PTHREAD_SETNAME_NP
+      (void) pthread_setname_np (pt, "groom");
+#endif
+      all_threads.push_back(pt);
+    }
 
   if (scan_files || scan_archives.size() > 0)
     {
       rc = pthread_create (& pt, NULL, thread_main_fts_source_paths, NULL);
       if (rc)
         error (EXIT_FAILURE, rc, "cannot spawn thread to traverse source paths\n");
+#ifdef HAVE_PTHREAD_SETNAME_NP
+      (void) pthread_setname_np (pt, "traverse");
+#endif
       all_threads.push_back(pt);
+
       for (unsigned i=0; i<concurrency; i++)
         {
           rc = pthread_create (& pt, NULL, thread_main_scanner, NULL);
           if (rc)
             error (EXIT_FAILURE, rc, "cannot spawn thread to scan source files / archives\n");
+#ifdef HAVE_PTHREAD_SETNAME_NP
+          (void) pthread_setname_np (pt, "scan");          
+#endif
           all_threads.push_back(pt);
         }
     }
-
+  
   /* Trivial main loop! */
   set_metric("ready", 1);
   while (! interrupted)

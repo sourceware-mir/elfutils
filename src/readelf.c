@@ -2554,7 +2554,9 @@ handle_symtab (Ebl *ebl, Elf_Scn *scn, GElf_Shdr *shdr)
 						 &vernaux_mem);
 		      while (vernaux != NULL
 			     && vernaux->vna_other != *versym
-			     && vernaux->vna_next != 0)
+			     && vernaux->vna_next != 0
+			     && (verneed_data->d_size - vna_offset
+				 >= vernaux->vna_next))
 			{
 			  /* Update the offset.  */
 			  vna_offset += vernaux->vna_next;
@@ -2569,6 +2571,9 @@ handle_symtab (Ebl *ebl, Elf_Scn *scn, GElf_Shdr *shdr)
 		      /* Check whether we found the version.  */
 		      if (vernaux != NULL && vernaux->vna_other == *versym)
 			/* Found it.  */
+			break;
+
+		      if (verneed_data->d_size - vn_offset < verneed->vn_next)
 			break;
 
 		      vn_offset += verneed->vn_next;
@@ -2604,6 +2609,9 @@ handle_symtab (Ebl *ebl, Elf_Scn *scn, GElf_Shdr *shdr)
 		    {
 		      if (verdef->vd_ndx == (*versym & 0x7fff))
 			/* Found the definition.  */
+			break;
+
+		      if (verdef_data->d_size - vd_offset < verdef->vd_next)
 			break;
 
 		      vd_offset += verdef->vd_next;
@@ -7599,7 +7607,9 @@ attr_callback (Dwarf_Attribute *attrp, void *arg)
 	case DW_AT_GNU_call_site_data_value:
 	case DW_AT_GNU_call_site_target:
 	case DW_AT_GNU_call_site_target_clobbered:
-	  if (form != DW_FORM_data16)
+	  if (form == DW_FORM_exprloc
+	      || (form != DW_FORM_data16
+		  && attrp->cu->version < 4)) /* blocks were expressions.  */
 	    {
 	      putchar ('\n');
 	      print_ops (cbargs->dwflmod, cbargs->dbg,
@@ -7792,7 +7802,8 @@ print_debug_units (Dwfl_Module *dwflmod,
 	{
 	  Dwarf_Die typedie;
 	  Dwarf_Off dieoffset;
-	  dieoffset = dwarf_dieoffset (dwarf_offdie_types (dbg, subdie_off,
+	  dieoffset = dwarf_dieoffset (dwarf_offdie_types (dbg, cu->start
+							   + subdie_off,
 							   &typedie));
 	  printf (_(" Type unit at offset %" PRIu64 ":\n"
 			   " Version: %" PRIu16

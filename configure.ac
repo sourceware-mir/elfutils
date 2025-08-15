@@ -17,7 +17,7 @@ dnl  GNU General Public License for more details.
 dnl
 dnl  You should have received a copy of the GNU General Public License
 dnl  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-AC_INIT([elfutils],[0.183],[https://sourceware.org/bugzilla],[elfutils],[http://elfutils.org/])
+AC_INIT([elfutils],[0.184],[https://sourceware.org/bugzilla],[elfutils],[http://elfutils.org/])
 
 dnl Workaround for older autoconf < 2.64
 m4_ifndef([AC_PACKAGE_URL],
@@ -519,11 +519,41 @@ CFLAGS="$old_CFLAGS"])
 AM_CONDITIONAL(HAVE_IMPLICIT_FALLTHROUGH_WARNING,
 	       [test "x$ac_cv_implicit_fallthrough" != "xno"])
 
+# Check whether the compiler additionally accepts -Wimplicit-fallthrough=5
+# GCC accepts this and 5 means "don't parse any fallthrough comments and
+# only accept the fallthrough attribute"
+AC_CACHE_CHECK([whether the compiler accepts -Wimplicit-fallthrough=5], ac_cv_implicit_fallthrough_5, [dnl
+old_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Wimplicit-fallthrough=5 -Werror"
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([])],
+		  ac_cv_implicit_fallthrough_5=yes, ac_cv_implicit_fallthrough_5=no)
+CFLAGS="$old_CFLAGS"])
+AM_CONDITIONAL(HAVE_IMPLICIT_FALLTHROUGH_5_WARNING,
+	       [test "x$ac_cv_implicit_fallthrough_5" != "xno"])
+
 # Assume the fallthrough attribute is supported if -Wimplict-fallthrough is supported
 if test "$ac_cv_implicit_fallthrough" = "yes"; then
 	AC_DEFINE([HAVE_FALLTHROUGH], [1],
 		  [Defined if __attribute__((fallthrough)) is supported])
 fi
+
+AC_CACHE_CHECK([whether the compiler accepts -Wtrampolines], ac_cv_trampolines, [dnl
+old_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Wtrampolines -Werror"
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([])],
+		  ac_cv_trampolines=yes, ac_cv_trampolines=no)
+CFLAGS="$old_CFLAGS"])
+AM_CONDITIONAL(HAVE_TRAMPOLINES_WARNING,
+	       [test "x$ac_cv_trampolines" != "xno"])
+
+AC_CACHE_CHECK([whether the compiler accepts -Wno-packed-not-aligned], ac_cv_no_packed_not_aligned, [dnl
+old_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Wno-packed-not-aligned -Werror"
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([])],
+		  ac_cv_no_packed_not_aligned=yes, ac_cv_no_packed_not_aligned=no)
+CFLAGS="$old_CFLAGS"])
+AM_CONDITIONAL(HAVE_NO_PACKED_NOT_ALIGNED_WARNING,
+	       [test "x$ac_cv_no_packed_not_aligned" != "xno"])
 
 saved_LIBS="$LIBS"
 AC_SEARCH_LIBS([argp_parse], [argp])
@@ -716,6 +746,9 @@ AS_IF([test "x$enable_libdebuginfod" != "xno"], [
       AC_MSG_NOTICE([building (bootstrap) dummy libdebuginfo library])
     fi
 ])
+
+AC_CHECK_LIB(pthread, pthread_setname_np, [
+                      AC_DEFINE([HAVE_PTHREAD_SETNAME_NP],[1],[Enable pthread_setname_np])])
 
 AS_IF([test "x$enable_libdebuginfod" = "xyes" || test "x$enable_libdebuginfod" = "xdummy"],
       [AC_DEFINE([ENABLE_LIBDEBUGINFOD], [1], [Enable libdebuginfod])])

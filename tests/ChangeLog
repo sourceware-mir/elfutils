@@ -1,3 +1,72 @@
+2021-05-04  Alice Zhang  <alizhang@redhat.com>
+
+	* run-debuginfod-find.sh: Added tests for negative cache files.
+
+2021-04-26  Frank Ch. Eigler <fche@redhat.com>
+
+	PR27571
+	* run-debuginfod-find.sh: Add test case for unwriteable cache files.
+
+2021-04-23  Omar Sandoval  <osandov@fb.com>
+
+	* run-low_high_pc-dw-form-indirect.sh: New file.
+	* run-readelf-dw-form-indirect.sh: New file.
+	* testfile-dw-form-indirect.bz2: New file.
+	* Makefile.am (TESTS): Add run-low_high_pc-dw-form-indirect.sh and
+	run-readelf-dw-form-indirect.sh.
+	(EXTRA_DIST): Add run-low_high_pc-dw-form-indirect.sh,
+	run-readelf-dw-form-indirect.sh, and testfile-dw-form-indirect.bz2.
+
+2021-04-26  Frank Ch. Eigler <fche@redhat.com>
+
+	PR26125
+	* run-debuginfod-find.sh: Add test case for cache cleanup rmdir.
+
+2021-04-23  Frank Ch. Eigler  <fche@redhat.com>
+
+	* run-debuginfod-find.sh: Add a tiny test for client object reuse.
+	Add an "errfiles" test construct to ask the framework to print
+	various files in the case of an error.
+
+2021-03-30  Frank Ch. Eigler  <fche@redhat.com>
+
+	* run-debuginfod-find.sh: Add thread comm checks.
+
+2021-02-17  Timm Bäder  <tbaeder@redhat.com>
+
+	* elfstrmerge.c (main): Move new_data_buf function to...
+	(new_data_buf): ...top-level static function adding fname,
+	ndx, shdrstrnd and shdrnum as arguments.
+
+2021-02-17  Timm Bäder  <tbaeder@redhat.com>
+
+	* elfstrmerge.c (main): Move newsecndx function to...
+	(newsecndx): ...top-level static function adding shdrstrndx,
+	shdrnum and fname as arguments.
+
+2021-02-25  Frank Ch. Eigler <fche@redhat.com>
+
+	* run-debuginfod-find.sh: Add bad webapi artifacttype test.
+
+2021-02-17  Frank Ch. Eigler <fche@redhat.com>
+
+	* run-debuginfod-find.sh: Tweak wait_ready() to also print -vvv log of
+	appropriate debuginfod if metric timeout occurs.  Focus grooming
+	test carefully at a more deterministic metric.
+
+2021-02-12  Mark Wielaard  <mark@klomp.org>
+
+	* run-readelf-types.sh: Add CU start to type offset reference.
+
+2021-02-07  Alexander Miller  <alex.miller@gmx.de>
+
+	* Makefile.am (TESTS_ENVIRONMENT): Quote variables.
+	(valgrind_cmd): Unquote variable.
+
+2021-02-08  Érico Nogueira  <ericonr@disroot.org>
+
+	* run-debuginfod-find.sh: Check for cpio availability.
+
 2021-02-04  Frank Ch. Eigler <fche@redhat.com>
 
 	* run-debuginfod-find.sh: Smoke test --fdcache-mintmp option handling.
