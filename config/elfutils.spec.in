@@ -7,6 +7,13 @@ License: GPLv3+ and (GPLv2+ or LGPLv3+) and GFDL
 Source: ftp://sourceware.org/pub/elfutils/%{version}/elfutils-%{version}.tar.bz2
 Summary: A collection of utilities and DSOs to handle ELF files and DWARF data
 
+# eu-stacktrace currently only supports x86_64
+%ifarch x86_64
+%global enable_stacktrace 1
+%else
+%global enable_stacktrace 0
+%endif
+
 Requires: elfutils-libelf = %{version}-%{release}
 Requires: elfutils-libs = %{version}-%{release}
 # Can be a Recommends if rpm supports that
@@ -52,6 +59,11 @@ BuildRequires: rpm-devel
 BuildRequires: ima-evm-utils-devel
 BuildRequires: openssl-devel
 BuildRequires: rpm-sign
+
+# For eu-stacktrace
+%if %{enable_stacktrace}
+BuildRequires: sysprof-capture-devel
+%endif
 
 %define _gnu %{nil}
 %define _programprefix eu-
@@ -197,7 +209,13 @@ such servers to download those files on demand.
 %setup -q
 
 %build
-%configure --program-prefix=%{_programprefix} --enable-debuginfod --enable-debuginfod-urls
+%configure --program-prefix=%{_programprefix} \
+           --enable-debuginfod \
+           --enable-debuginfod-urls=https://debuginfod.elfutils.org/ \
+%if %{enable_stacktrace}
+           --enable-stacktrace \
+%endif
+           --enable-debuginfod-ima-verification
 make -s %{?_smp_mflags}
 
 %install
@@ -259,6 +277,9 @@ fi
 %{_bindir}/eu-size
 %{_bindir}/eu-srcfiles
 %{_bindir}/eu-stack
+%if %{enable_stacktrace}
+%{_bindir}/eu-stacktrace
+%endif
 %{_bindir}/eu-strings
 %{_bindir}/eu-strip
 %{_bindir}/eu-unstrip
@@ -279,6 +300,7 @@ fi
 #%%{_includedir}/elfutils/libasm.h
 %{_includedir}/elfutils/libdw.h
 %{_includedir}/elfutils/libdwfl.h
+%{_includedir}/elfutils/libdwfl_stacktrace.h
 %{_includedir}/elfutils/libdwelf.h
 %{_includedir}/elfutils/version.h
 #%%{_libdir}/libasm.so
@@ -356,6 +378,27 @@ exit 0
 %systemd_postun_with_restart debuginfod.service
 
 %changelog
+* Fri Apr 25 2025 Aaron Merey <amerey@redhat.com> 0.193-1
+- debuginfod: Add CORS (webapp access) support to webapi and --cors 
+  option.
+- Add --listen-address option for binding the HTTP listen socket to a
+  specific IPv4 or IPv6 address.
+- debuginfod client now caches x-debuginfod-* HTTP headers alongside
+  downloaded files.
+- libdw: Add dwarf_language and dwarf_language_lower_bound functions.
+- Improved support for DWARF6 language metadata as well as DWARF language
+  constants for Nim, Dylan, Algol68, V and Mojo.
+- dwarf_srclang is now forward-compatible with DWARF6 language constants.
+- libdwfl_stacktrace: Experimental new library interface for unwinding
+  stack samples into call chains, and tracking and caching Elf data for
+  multiple processes, building on libdwfl.  Initially supports perf_events
+  stack sample data.
+- libelf: elf_scnshndx has been rewritten to be more robust, particularily
+  for ELF files with more than 64K sections.
+- readelf: Improved handling of corrupt ELF data.
+- --section-headers output now includes a "Key to Flags" explaining section
+  flag meanings.
+
 * Fri Oct 18 2024 Aaron Merey <amerey@redhat.com> 0.192-1
 - CONDUCT: A new code of conduct has been adopted.  See the CONDUCT file
   for more information.

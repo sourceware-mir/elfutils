@@ -1,5 +1,5 @@
 /* Internal definitions for libdwfl.
-   Copyright (C) 2005-2015, 2018, 2024 Red Hat, Inc.
+   Copyright (C) 2005-2015, 2018, 2024-2025 Red Hat, Inc.
    This file is part of elfutils.
 
    This file is free software; you can redistribute it and/or modify
@@ -111,9 +111,13 @@ struct Dwfl_User_Core
   int fd;                       /* close if >= 0.  */
 };
 
+/* forward decl from ../libdwfl_stacktrace/ */
+typedef struct Dwflst_Process_Tracker Dwflst_Process_Tracker;
+
 struct Dwfl
 {
   const Dwfl_Callbacks *callbacks;
+  Dwflst_Process_Tracker *tracker;
 #ifdef ENABLE_LIBDEBUGINFOD
   debuginfod_client *debuginfod;
 #endif
@@ -591,6 +595,15 @@ extern Dwfl_Module *__libdwfl_report_offline (Dwfl *dwfl, const char *name,
 extern void __libdwfl_process_free (Dwfl_Process *process)
   internal_function;
 
+/* Basic implementation of Dwfl_Thread_Callbacks.set_initial_registers.
+   ARG must be a Dwfl_Thread *.  Calls dwfl_thread_state_register_pc
+   if firstreg is -1 (indicating arch PC), dwfl_thread_state_registers
+   otherwise.  */
+extern bool __libdwfl_set_initial_registers_thread (int firstreg,
+						    unsigned nregs,
+						    const Dwarf_Word *regs,
+						    void *arg);
+
 /* Update STATE->unwound for the unwound frame.
    On error STATE->unwound == NULL
    or STATE->unwound->pc_state == DWFL_FRAME_STATE_ERROR;
@@ -744,6 +757,7 @@ extern int dwfl_link_map_report (Dwfl *dwfl, const void *auxv, size_t auxv_size,
 
 /* Avoid PLT entries.  */
 INTDECL (dwfl_begin)
+INTDECL (dwfl_end)
 INTDECL (dwfl_errmsg)
 INTDECL (dwfl_errno)
 INTDECL (dwfl_addrmodule)

@@ -18,13 +18,7 @@ dnl  GNU General Public License for more details.
 dnl
 dnl  You should have received a copy of the GNU General Public License
 dnl  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-AC_INIT([elfutils],[0.192],[https://sourceware.org/bugzilla],[elfutils],[http://elfutils.org/])
-
-dnl Workaround for older autoconf < 2.64
-m4_ifndef([AC_PACKAGE_URL],
-         [AC_DEFINE([PACKAGE_URL], ["http://elfutils.org/"],
-                    [Define to home page for this package])
-          AC_SUBST([PACKAGE_URL], ["http://elfutils.org/"])])
+AC_INIT([elfutils],[0.193],[https://sourceware.org/bugzilla],[elfutils],[http://elfutils.org/])
 
 LIBDEBUGINFOD_SONAME=libdebuginfod.so.1
 AC_SUBST([LIBDEBUGINFOD_SONAME])
@@ -45,8 +39,8 @@ fi
 AC_CONFIG_AUX_DIR([config])
 AC_CONFIG_FILES([config/Makefile])
 
-AC_COPYRIGHT([Copyright (C) 1996-2024 The elfutils developers.])
-AC_PREREQ(2.63)			dnl Minimum Autoconf version required.
+AC_COPYRIGHT([Copyright (C) 1996-2025 The elfutils developers.])
+AC_PREREQ(2.69)			dnl Minimum Autoconf version required.
 
 dnl We use GNU make extensions; automake 1.10 defaults to -Wportability.
 AM_INIT_AUTOMAKE([gnits 1.11 -Wno-portability dist-bzip2 no-dist-gzip parallel-tests])
@@ -88,7 +82,10 @@ AS_IF([test "$use_locks" = yes],
 
 AH_TEMPLATE([USE_LOCKS], [Defined if libraries should be thread-safe.])
 
-m4_version_prereq([2.70], [AC_PROG_CC], [AC_PROG_CC_C99])
+# Provided by gnulib's m4/std-gnu11.m4 for autoconf pre 2.70
+AC_PROG_CC
+AS_IF([test "x$ac_cv_prog_cc_c11" = "xno"],
+      [AC_MSG_ERROR([C11 support required])])
 AC_PROG_CXX
 AC_PROG_RANLIB
 AC_PROG_YACC
@@ -229,17 +226,9 @@ LDFLAGS="$save_LDFLAGS"])
 AS_IF([test "x$ac_cv_tls" != xyes],
       AC_MSG_ERROR([__thread support required]))
 
-dnl Before 4.9 gcc doesn't ship stdatomic.h, but the necessary atomics are
-dnl available by (at least) 4.7. So if the system doesn't have a stdatomic.h we
-dnl fall back on one copied from FreeBSD that handles the difference.
-AC_CACHE_CHECK([whether gcc provides stdatomic.h], ac_cv_has_stdatomic,
-  [AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#include <stdatomic.h>]])],
-		     ac_cv_has_stdatomic=yes, ac_cv_has_stdatomic=no)])
-AM_CONDITIONAL(HAVE_STDATOMIC_H, test "x$ac_cv_has_stdatomic" = xyes)
-AS_IF([test "x$ac_cv_has_stdatomic" = xyes], [AC_DEFINE(HAVE_STDATOMIC_H)])
-
-AH_TEMPLATE([HAVE_STDATOMIC_H], [Define to 1 if `stdatomic.h` is provided by the
-                                 system, 0 otherwise.])
+dnl Although we test for C11 above that doesn't mean we have stdatomic.h
+dnl We need at least gcc 4.9+ for that.
+AC_CHECK_HEADERS([stdatomic.h], [], [AC_MSG_ERROR([stdatomic.h required])])
 
 dnl This test must come as early as possible after the compiler configuration
 dnl tests, because the choice of the file model can (in principle) affect
@@ -370,10 +359,15 @@ if test "$use_address" = yes; then
 fi
 AM_CONDITIONAL(USE_ADDRESS_SANITIZER, test "$use_address" = yes)
 
+AC_ARG_ENABLE([helgrind],
+AS_HELP_STRING([--enable-helgrind],[run all tests under the valgrind tool helgrind]),
+[use_helgrind=$enableval], [use_helgrind=no])
+
 AC_ARG_ENABLE([valgrind],
 AS_HELP_STRING([--enable-valgrind],[run all tests under valgrind]),
 [use_valgrind=$enableval], [use_valgrind=no])
-if test "$use_valgrind" = yes; then
+
+if test "$use_valgrind" = yes -o "$use_helgrind" = yes; then
   if test "$use_address" = yes; then
     AC_MSG_ERROR([cannot enable valgrind and sanitize address together])
   fi
@@ -382,7 +376,8 @@ if test "$use_valgrind" = yes; then
     AC_MSG_ERROR([valgrind not found])
   fi
 fi
-AM_CONDITIONAL(USE_VALGRIND, test "$use_valgrind" = yes)
+AM_CONDITIONAL(USE_VALGRIND, test "$use_valgrind" = yes -o "$use_helgrind" = yes)
+AM_CONDITIONAL(USE_HELGRIND, test "$use_helgrind" = yes)
 
 AC_ARG_WITH([valgrind],
 AS_HELP_STRING([--with-valgrind],[include directory for Valgrind headers]),
@@ -401,6 +396,12 @@ fi
 AC_ARG_ENABLE([valgrind-annotations],
 AS_HELP_STRING([--enable-valgrind-annotations],[insert extra annotations for better valgrind support]),
 [use_vg_annotations=$enableval], [use_vg_annotations=no])
+
+# Helgrind requires Valgrind annotations.
+if test "$use_vg_annotations" = no -a "$use_helgrind" = yes; then
+  AC_MSG_ERROR(["--enable-helgrind requires --enable-valgrind-annotations"])
+fi
+
 if test "$use_vg_annotations" = yes; then
     if test "x$HAVE_VALGRIND_HEADERS" != "xyes"; then
       AC_MSG_CHECKING([whether Valgrind headers are available])
@@ -484,7 +485,7 @@ AC_CHECK_FUNCS([process_vm_readv mremap])
 AS_IF([test "x$ac_cv_func_mremap" = "xno"],
       [AC_MSG_WARN([elf_update needs mremap to support ELF_C_RDWR_MMAP])])
 
-AC_CHECK_HEADERS([error.h])
+AC_CHECK_HEADER([error.h], [AC_CHECK_FUNC([error], AC_DEFINE([HAVE_ERROR_H], [1], [Define if error.h is usable]))])
 AC_CHECK_HEADERS([err.h])
 
 dnl for debuginfod concurrency heuristics
@@ -699,6 +700,9 @@ AC_CONFIG_FILES([libdw/Makefile])
 dnl Higher-level DWARF support library.
 AC_CONFIG_FILES([libdwfl/Makefile])
 
+dnl Higher-level DWARF stacktrace support library
+AC_CONFIG_FILES([libdwfl_stacktrace/Makefile])
+
 dnl CPU handling library.
 AC_CONFIG_FILES([libcpu/Makefile])
 
@@ -784,6 +788,14 @@ if test "$sys_user_has_user_regs" = "yes"; then
             [Define to 1 if <sys/user.h> defines struct user_regs_struct])
 fi
 
+AC_CHECK_TYPE([struct user_pac_mask],
+              [has_user_pac_mask=yes], [has_user_pac_mask=no],
+              [[#include <asm/ptrace.h>]])
+if test "$has_user_pac_mask" = "yes"; then
+  AC_DEFINE(HAVE_USER_PACK_MASK, 1,
+            [Defined if struct user_pac_mask exists.])
+fi
+
 # On a 64-bit host where can can use $CC -m32, we'll run two sets of tests.
 utrace_BIARCH
 CC_BIARCH="$CC $utrace_biarch"
@@ -837,16 +849,7 @@ AC_ARG_ENABLE([debuginfod-ima-verification],[AS_HELP_STRING([--enable-debuginfod
 # Look for various packages, minimum versions as per rhel7.
 PKG_PROG_PKG_CONFIG
 PKG_CHECK_MODULES([libcurl],[libcurl >= 7.29.0],[have_libcurl=yes],[have_libcurl=no])
-AC_CHECK_LIB(pthread, pthread_setname_np, [AC_DEFINE([HAVE_PTHREAD_SETNAME_NP],[1],[Enable pthread_setname_np])])
 PKG_CHECK_MODULES([jsonc],[json-c >= 0.11],[have_jsonc=yes],[have_jsonc=no])
-PKG_CHECK_MODULES([libmicrohttpd],[libmicrohttpd >= 0.9.33],[],[enable_debuginfod=no])
-PKG_CHECK_MODULES([oldlibmicrohttpd],[libmicrohttpd < 0.9.51],[old_libmicrohttpd=yes],[old_libmicrohttpd=no])
-PKG_CHECK_MODULES([sqlite3],[sqlite3 >= 3.7.17],[have_sqlite3=yes],[have_sqlite3=no])
-PKG_CHECK_MODULES([libarchive],[libarchive >= 3.1.2],[have_libarchive=yes],[have_libarchive=no])
-AC_CHECK_LIB(rpm, headerGet, [AC_CHECK_DECL(RPMSIGTAG_FILESIGNATURES,
-                                            [AC_SUBST(rpm_LIBS, '-lrpm -lrpmio')],[], [#include <rpm/rpmlib.h>])])
-AC_CHECK_LIB(crypto, EVP_MD_CTX_new, [AC_SUBST(crypto_LIBS, '-lcrypto')])
-AC_CHECK_HEADER(imaevm.h)
 #
 # pronounce judgement on ability to build client, overridden by =yes/=no
 if test "x$enable_libdebuginfod" = "xno"; then
@@ -855,11 +858,15 @@ elif test "x$enable_libdebuginfod" = "xdummy"; then
    true
 elif test "x$have_jsonc$have_libcurl" = "xyesyes"; then
    enable_libdebuginfod=yes
-elif test "x$enable_libdebuginfod" = "xyes" -o "x$enable_libdebuginfod" = "xdummy"; then
-   AC_MSG_ERROR([unable to build libdebuginfod])
+elif test "x$enable_libdebuginfod" = "xyes"; then
+   AC_MSG_ERROR([unable to build libdebuginfod, missing libjson-c or libcurl])
 else
    enable_libdebuginfod=no
 fi
+PKG_CHECK_MODULES([libmicrohttpd],[libmicrohttpd >= 0.9.33],[],[enable_debuginfod=no])
+PKG_CHECK_MODULES([oldlibmicrohttpd],[libmicrohttpd < 0.9.51],[old_libmicrohttpd=yes],[old_libmicrohttpd=no])
+PKG_CHECK_MODULES([sqlite3],[sqlite3 >= 3.7.17],[have_sqlite3=yes],[have_sqlite3=no])
+PKG_CHECK_MODULES([libarchive],[libarchive >= 3.1.2],[have_libarchive=yes],[have_libarchive=no])
 #
 # pronounce judgement on ability to build server, overridden by =yes/=no
 if test "x$enable_debuginfod" = "xno"; then
@@ -867,18 +874,22 @@ if test "x$enable_debuginfod" = "xno"; then
 elif test "x$have_jsonc$HAVE_CXX11$have_libarchive$have_sqlite3" = "xyesyesyesyes"; then
    enable_debuginfod=yes
 elif test "x$enable_debuginfod" = "xyes"; then
-   AC_MSG_ERROR([unable to build debuginfod])
+   AC_MSG_ERROR([unable to build debuginfod, missing libmicrohttpd, sqlite3 or libarchive])
 else
    enable_debuginfod=no
 fi
 #
+AC_CHECK_LIB(rpm, headerGet, [AC_CHECK_DECL(RPMSIGTAG_FILESIGNATURES,
+                                            [AC_SUBST(rpm_LIBS, '-lrpm -lrpmio')],[], [#include <rpm/rpmlib.h>])])
+AC_CHECK_LIB(crypto, EVP_MD_CTX_new, [AC_SUBST(crypto_LIBS, '-lcrypto')])
+AC_CHECK_HEADER(imaevm.h)
 # pronounce judgment on ima signature support
 if test "x$enable_debuginfod_ima_verification" = "xno"; then
    true
 elif test "x$ac_cv_lib_rpm_headerGet$ac_cv_have_decl_RPMSIGTAG_FILESIGNATURES$ac_cv_lib_crypto_EVP_MD_CTX_new$ac_cv_header_imaevm_h" = "xyesyesyesyes"; then
    enable_debuginfod_ima_verification=yes
 elif test "x$enable_debuginfod_ima_verification" = "xyes"; then
-   AC_MSG_ERROR([unable to enable debuginfod ima verification])
+   AC_MSG_ERROR([unable to enable ima verification, missing librpm, libcrypto or imaevm.h])
 else
    enable_debuginfod_ima_verification=no
 fi
@@ -892,8 +903,10 @@ AS_IF([test "x$enable_debuginfod" != "xno"],AC_DEFINE([ENABLE_DEBUGINFOD],[1],[B
 AM_CONDITIONAL([DEBUGINFOD],[test "x$enable_debuginfod" = "xyes"])
 AS_IF([test "x$enable_debuginfod_ima_verification" = "xyes"],AC_DEFINE([ENABLE_IMA_VERIFICATION],[1],[Build IMA verification]))
 AS_IF([test "x$have_libarchive" = "xyes"],AC_DEFINE([HAVE_LIBARCHIVE],[1],[Define to 1 if libarchive is available]))
-AM_CONDITIONAL([ENABLE_IMA_VERIFICATION],[test "$enable_debuginfod_ima_verification" = "xyes"])
+AM_CONDITIONAL([ENABLE_IMA_VERIFICATION],[test "x$enable_debuginfod_ima_verification" = "xyes"])
 AM_CONDITIONAL([OLD_LIBMICROHTTPD],[test "x$old_libmicrohttpd" = "xyes"])
+
+AC_CHECK_LIB(pthread, pthread_setname_np, [AC_DEFINE([HAVE_PTHREAD_SETNAME_NP],[1],[Enable pthread_setname_np])])
 
 dnl for /etc/profile.d/elfutils.{csh,sh}
 default_debuginfod_urls=""

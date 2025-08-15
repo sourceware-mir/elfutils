@@ -1,6 +1,6 @@
 /* Print information from ELF file in human-readable form.
    Copyright (C) 1999-2018 Red Hat, Inc.
-   Copyright (C) 2023 Mark J. Wielaard <mark@klomp.org>
+   Copyright (C) 2023, 2025 Mark J. Wielaard <mark@klomp.org>
    This file is part of elfutils.
 
    This file is free software; you can redistribute it and/or modify
@@ -341,6 +341,7 @@ static void print_strings (Ebl *ebl);
 static void dump_archive_index (Elf *, const char *);
 static void print_dwarf_addr (Dwfl_Module *dwflmod, int address_size,
 			      Dwarf_Addr address, Dwarf_Addr raw);
+static void print_flag_info(void);
 
 enum dyn_idx
 {
@@ -1406,9 +1407,19 @@ There are %zd section headers, starting at offset %#" PRIx64 ":\n\
 	}
     }
 
+  print_flag_info();
   fputc ('\n', stdout);
 }
 
+/* Print flag information.  */
+static void
+print_flag_info (void)
+{
+	puts ("Key to Flags:");
+	puts ("  W (write), A (alloc), X (execute), M (merge), S (strings), I (info),");
+	puts ("  L (link order), N (extra OS processing required), G (group), T (TLS),");
+	puts ("  C (compressed), O (ordered), R (GNU retain), E (exclude)");
+}
 
 /* Print the program header.  */
 static void
@@ -2111,9 +2122,10 @@ handle_relocs_rel (Ebl *ebl, GElf_Ehdr *ehdr, Elf_Scn *scn, GElf_Shdr *shdr)
       return;
     }
 
-  /* Search for the optional extended section index table.  */
+  /* Search for the optional extended section index table if there are
+     more than 64k sections.  */
   Elf_Data *xndxdata = NULL;
-  int xndxscnidx = elf_scnshndx (scn);
+  int xndxscnidx = shnum >= SHN_LORESERVE ? elf_scnshndx (symscn) : 0;
   if (unlikely (xndxscnidx > 0))
     xndxdata = elf_getdata (elf_getscn (ebl->elf, xndxscnidx), NULL);
 
@@ -2218,7 +2230,11 @@ handle_relocs_rel (Ebl *ebl, GElf_Ehdr *ehdr, Elf_Scn *scn, GElf_Shdr *shdr)
 			_("INVALID SYMBOL"),
 			(long int) GELF_R_SYM (rel->r_info));
 	    }
-	  else if (GELF_ST_TYPE (sym->st_info) != STT_SECTION)
+	  else if (GELF_ST_TYPE (sym->st_info) != STT_SECTION
+		   && !(GELF_ST_TYPE (sym->st_info) == STT_NOTYPE
+			&& GELF_ST_BIND (sym->st_info) == STB_LOCAL
+			&& sym->st_shndx != SHN_UNDEF
+			&& sym->st_value == 0)) // local start section label
 	    printf ("  %#0*" PRIx64 "  %-20s %#0*" PRIx64 "  %s\n",
 		    class == ELFCLASS32 ? 10 : 18, rel->r_offset,
 		    likely (ebl_reloc_type_check (ebl,
@@ -2232,7 +2248,9 @@ handle_relocs_rel (Ebl *ebl, GElf_Ehdr *ehdr, Elf_Scn *scn, GElf_Shdr *shdr)
 		    elf_strptr (ebl->elf, symshdr->sh_link, sym->st_name));
 	  else
 	    {
-	      /* This is a relocation against a STT_SECTION symbol.  */
+	      /* This is a relocation against a STT_SECTION symbol
+		 or a local start section label for which we print
+		 section name.  */
 	      GElf_Shdr secshdr_mem;
 	      GElf_Shdr *secshdr;
 	      secshdr = gelf_getshdr (elf_getscn (ebl->elf,
@@ -2300,9 +2318,10 @@ handle_relocs_rela (Ebl *ebl, GElf_Ehdr *ehdr, Elf_Scn *scn, GElf_Shdr *shdr)
       return;
     }
 
-  /* Search for the optional extended section index table.  */
+  /* Search for the optional extended section index table if there are
+     more than 64k sections.  */
   Elf_Data *xndxdata = NULL;
-  int xndxscnidx = elf_scnshndx (scn);
+  int xndxscnidx = shnum >= SHN_LORESERVE ? elf_scnshndx (symscn) : 0;
   if (unlikely (xndxscnidx > 0))
     xndxdata = elf_getdata (elf_getscn (ebl->elf, xndxscnidx), NULL);
 
@@ -2409,7 +2428,11 @@ handle_relocs_rela (Ebl *ebl, GElf_Ehdr *ehdr, Elf_Scn *scn, GElf_Shdr *shdr)
 			_("INVALID SYMBOL"),
 			(long int) GELF_R_SYM (rel->r_info));
 	    }
-	  else if (GELF_ST_TYPE (sym->st_info) != STT_SECTION)
+	  else if (GELF_ST_TYPE (sym->st_info) != STT_SECTION
+		   && !(GELF_ST_TYPE (sym->st_info) == STT_NOTYPE
+			&& GELF_ST_BIND (sym->st_info) == STB_LOCAL
+			&& sym->st_shndx != SHN_UNDEF
+			&& sym->st_value == 0)) // local start section label
 	    printf ("\
   %#0*" PRIx64 "  %-15s %#0*" PRIx64 "  %+6" PRId64 " %s\n",
 		    class == ELFCLASS32 ? 10 : 18, rel->r_offset,
@@ -2425,7 +2448,9 @@ handle_relocs_rela (Ebl *ebl, GElf_Ehdr *ehdr, Elf_Scn *scn, GElf_Shdr *shdr)
 		    elf_strptr (ebl->elf, symshdr->sh_link, sym->st_name));
 	  else
 	    {
-	      /* This is a relocation against a STT_SECTION symbol.  */
+	      /* This is a relocation against a STT_SECTION symbol
+		 or a local start section label for which we print
+		 section name.  */
 	      GElf_Shdr secshdr_mem;
 	      GElf_Shdr *secshdr;
 	      secshdr = gelf_getshdr (elf_getscn (ebl->elf,
@@ -2639,6 +2664,7 @@ process_symtab (Ebl *ebl, unsigned int nsyms, Elf64_Word idx,
       char typebuf[64];
       char bindbuf[64];
       char scnbuf[64];
+      const char *sym_name;
       Elf32_Word xndx;
       GElf_Sym sym_mem;
       GElf_Sym *sym
@@ -2650,6 +2676,19 @@ process_symtab (Ebl *ebl, unsigned int nsyms, Elf64_Word idx,
       /* Determine the real section index.  */
       if (likely (sym->st_shndx != SHN_XINDEX))
         xndx = sym->st_shndx;
+      if (use_dynamic_segment == true)
+	{
+	  if (validate_str (symstr_data->d_buf, sym->st_name,
+			    symstr_data->d_size))
+	    sym_name = (char *)symstr_data->d_buf + sym->st_name;
+	  else
+	    sym_name = NULL;
+	}
+      else
+	sym_name = elf_strptr (ebl->elf, idx, sym->st_name);
+
+      if (sym_name == NULL)
+	sym_name = "???";
 
       printf (_ ("\
 %5u: %0*" PRIx64 " %6" PRId64 " %-7s %-6s %-9s %6s %s"),
@@ -2662,9 +2701,7 @@ process_symtab (Ebl *ebl, unsigned int nsyms, Elf64_Word idx,
               get_visibility_type (GELF_ST_VISIBILITY (sym->st_other)),
               ebl_section_name (ebl, sym->st_shndx, xndx, scnbuf,
                                 sizeof (scnbuf), NULL, shnum),
-              use_dynamic_segment == true
-                  ? (char *)symstr_data->d_buf + sym->st_name
-                  : elf_strptr (ebl->elf, idx, sym->st_name));
+              sym_name);
 
       if (versym_data != NULL)
         {
@@ -2900,7 +2937,7 @@ handle_dynamic_symtab (Ebl *ebl)
   for (size_t i = 0; i < phnum; ++i)
     {
       phdr = gelf_getphdr (ebl->elf, i, &phdr_mem);
-      if (phdr->p_type == PT_DYNAMIC)
+      if (phdr == NULL || phdr->p_type == PT_DYNAMIC)
 	break;
     }
   if (phdr == NULL)
@@ -4346,6 +4383,20 @@ dwarf_lang_string (unsigned int lang)
 
 
 static const char *
+dwarf_lname_string (unsigned int lname)
+{
+  switch (lname)
+    {
+#define DWARF_ONE_KNOWN_DW_LNAME(NAME, CODE) case CODE: return #NAME;
+      DWARF_ALL_KNOWN_DW_LNAME
+#undef DWARF_ONE_KNOWN_DW_LNAME
+    default:
+      return NULL;
+    }
+}
+
+
+static const char *
 dwarf_inline_string (unsigned int code)
 {
   static const char *const known[] =
@@ -4649,6 +4700,15 @@ dwarf_lang_name (unsigned int lang)
 {
   const char *ret = dwarf_lang_string (lang);
   return string_or_unknown (ret, lang, DW_LANG_lo_user, DW_LANG_hi_user, false);
+}
+
+
+static const char *
+dwarf_lname_name (unsigned int lname)
+{
+  const char *ret = dwarf_lname_string (lname);
+  return string_or_unknown (ret, lname, DW_LNAME_lo_user, DW_LNAME_hi_user,
+			    false);
 }
 
 
@@ -7158,7 +7218,7 @@ print_debug_frame_section (Dwfl_Module *dwflmod, Ebl *ebl, GElf_Ehdr *ehdr,
   size_t shstrndx;
   /* We know this call will succeed since it did in the caller.  */
   (void) elf_getshdrstrndx (ebl->elf, &shstrndx);
-  const char *scnname = elf_strptr (ebl->elf, shstrndx, shdr->sh_name);
+  const char *scnname = section_name (ebl, shdr);
 
   /* Needed if we find PC-relative addresses.  */
   GElf_Addr bias;
@@ -7911,6 +7971,9 @@ attr_callback (Dwarf_Attribute *attrp, void *arg)
 
 	case DW_AT_language:
 	  valuestr = dwarf_lang_name (num);
+	  break;
+	case DW_AT_language_name:
+	  valuestr = dwarf_lname_name (num);
 	  break;
 	case DW_AT_encoding:
 	  valuestr = dwarf_encoding_name (num);
@@ -11921,7 +11984,13 @@ print_debug (Dwfl_Module *dwflmod, Ebl *ebl, GElf_Ehdr *ehdr)
 		fprintf (stderr, "Warning: Couldn't open DWARF skeleton file"
 			 " '%s'\n", skel_name);
 	      else
-		skel_dwfl = create_dwfl (skel_fd, skel_name);
+		{
+		  skel_dwfl = create_dwfl (skel_fd, skel_name);
+
+		  /* skel_fd was dup'ed by create_dwfl.  We can close the
+		     original now.  */
+		  close (skel_fd);
+		}
 
 	      if (skel_dwfl != NULL)
 		{
@@ -13309,7 +13378,7 @@ dump_data_section (Elf_Scn *scn, const GElf_Shdr *shdr, const char *name)
 			_("Couldn't uncompress section"),
 			elf_ndxscn (scn));
 	    }
-	  else if (startswith (name, ".zdebug"))
+	  else if (name && startswith (name, ".zdebug"))
 	    {
 	      if (elf_compress_gnu (scn, 0, 0) < 0)
 		printf ("WARNING: %s [%zd]\n",
@@ -13360,7 +13429,7 @@ print_string_section (Elf_Scn *scn, const GElf_Shdr *shdr, const char *name)
 			_("Couldn't uncompress section"),
 			elf_ndxscn (scn));
 	    }
-	  else if (startswith (name, ".zdebug"))
+	  else if (name && startswith (name, ".zdebug"))
 	    {
 	      if (elf_compress_gnu (scn, 0, 0) < 0)
 		printf ("WARNING: %s [%zd]\n",
@@ -13543,8 +13612,8 @@ dump_archive_index (Elf *elf, const char *fname)
 			  as_off, fname, elf_errmsg (-1));
 
 	  const Elf_Arhdr *h = elf_getarhdr (subelf);
-
-	  printf (_("Archive member '%s' contains:\n"), h->ar_name);
+	  if (h != NULL)
+	    printf (_("Archive member '%s' contains:\n"), h->ar_name);
 
 	  elf_end (subelf);
 	}

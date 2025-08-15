@@ -56,7 +56,8 @@ check_PROGRAMS = arextract arsymtest newfile saridx scnnames sectiondump \
 		  elfstrtab dwfl-proc-attach \
 		  elfshphehdr elfstrmerge dwelfgnucompressed elfgetchdr \
 		  elfgetzdata elfputzdata zstrptr emptyfile vendorelf \
-		  fillfile dwarf_default_lower_bound dwarf-die-addr-die \
+		  fillfile dwarf_default_lower_bound \
+		  dwarf_language_lower_bound dwarf-die-addr-die \
 		  get-units-invalid get-units-split attr-integrate-skel \
 		  all-dwarf-ranges unit-info next_cfi \
 		  elfcopy addsections xlate_notes elfrdwrnop \
@@ -64,7 +65,9 @@ check_PROGRAMS = arextract arsymtest newfile saridx scnnames sectiondump \
 		  getphdrnum leb128 read_unaligned \
 		  msg_tst system-elf-libelf-test system-elf-gelf-test \
 		  nvidia_extended_linemap_libdw elf-print-reloc-syms \
-		  cu-dwp-section-info declfiles \
+		  cu-dwp-section-info declfiles test-manyfuncs \
+		  eu_search_cfi eu_search_macros \
+		  eu_search_lines eu_search_die \
 		  $(asm_TESTS)
 
 asm_TESTS = asm-tst1 asm-tst2 asm-tst3 asm-tst4 asm-tst5 \
@@ -81,6 +84,16 @@ backtrace-child-biarch$(EXEEXT): backtrace-child.c
 		     $(AM_CFLAGS) $(CFLAGS) $(backtrace_child_CFLAGS) \
 		     $(AM_LDFLAGS) $(LDFLAGS) $(backtrace_child_LDFLAGS) \
 		     -o $@ $<
+
+# A test object with 64K sections and function symbols
+# Don't try to optimize or add debuginfo
+# Do explicitly add unwind tables, so there are definitely relocations
+# to all function symbols/sections.
+manyfuncs.o: manyfuncs.c
+	$(AM_V_CC)$(CC) -fasynchronous-unwind-tables -g0 -O0 -o $@ -c $<
+
+# We also want the manyfuncs.o (test) file generated
+check-local: manyfuncs.o
 
 if GCOV
 GCOV_FLAGS=-fprofile-arcs -ftest-coverage
@@ -142,6 +155,7 @@ TESTS = run-arextract.sh run-arsymtest.sh run-ar.sh newfile test-nlist \
 	run-readelf-aranges.sh run-readelf-line.sh run-readelf-z.sh \
 	run-readelf-frames.sh \
 	run-readelf-n.sh \
+	run-readelf-r-manyfuncs.sh \
 	run-retain.sh \
 	run-native-test.sh run-bug1-test.sh \
 	run-debuglink.sh run-debugaltlink.sh run-buildid.sh \
@@ -153,6 +167,7 @@ TESTS = run-arextract.sh run-arsymtest.sh run-ar.sh newfile test-nlist \
 	run-test-flag-nobits.sh run-prelink-addr-test.sh \
 	run-dwarf-getstring.sh run-rerequest_tag.sh run-typeiter.sh \
 	run-readelf-d.sh run-readelf-gdb_index.sh run-unstrip-n.sh \
+	run-readelf-lnames.sh \
 	run-low_high_pc.sh run-macro-test.sh run-elf_cntl_gelf_getshdr.sh \
 	run-test-archive64.sh run-readelf-vmcoreinfo.sh \
 	run-readelf-mixed-corenote.sh run-dwfllines.sh \
@@ -192,6 +207,7 @@ TESTS = run-arextract.sh run-arsymtest.sh run-ar.sh newfile test-nlist \
 	run-compress-test.sh \
 	run-readelf-zdebug.sh run-readelf-zdebug-rel.sh \
 	emptyfile vendorelf fillfile dwarf_default_lower_bound \
+	dwarf_language_lower_bound \
 	run-dwarf-die-addr-die.sh \
 	run-get-units-invalid.sh run-get-units-split.sh \
 	run-attr-integrate-skel.sh \
@@ -217,7 +233,10 @@ TESTS = run-arextract.sh run-arsymtest.sh run-ar.sh newfile test-nlist \
 	run-readelf-dw-form-indirect.sh run-strip-largealign.sh \
 	run-readelf-Dd.sh run-dwfl-core-noncontig.sh run-cu-dwp-section-info.sh \
 	run-declfiles.sh \
-	run-sysroot.sh
+	run-sysroot.sh \
+	run-test-manyfuncs.sh \
+	run-eu-search-cfi.sh run-eu-search-macros.sh \
+	run-eu-search-lines.sh run-eu-search-die.sh
 
 if !BIARCH
 export ELFUTILS_DISABLE_BIARCH = 1
@@ -228,7 +247,7 @@ export ELFUTILS_DISABLE_DEMANGLE = 1
 endif
 
 if LZMA
-TESTS += run-readelf-s.sh run-dwflsyms.sh run-debuginfod-seekable.sh
+TESTS += run-readelf-s.sh run-dwflsyms.sh
 endif
 
 if HAVE_ZSTD
@@ -277,6 +296,9 @@ TESTS += run-srcfiles-self.sh \
 	 run-debuginfod-client-profile.sh \
 	 run-debuginfod-find-metadata.sh \
 	 run-debuginfod-longsource.sh
+if LZMA
+TESTS += run-debuginfod-seekable.sh
+endif
 endif
 if !OLD_LIBMICROHTTPD
 # Will crash on too old libmicrohttpd
@@ -411,6 +433,7 @@ EXTRA_DIST = run-arextract.sh run-arsymtest.sh run-ar.sh \
 	     testfile_gnu_props.32be.o.bz2 \
 	     testfile_gnu_props.64be.o.bz2 \
 	     testfile-gnu-property-note-aarch64.bz2 \
+	     run-readelf-r-manyfuncs.sh \
 	     run-retain.sh testfile-retain.o.bz2 \
 	     run-allfcts-multi.sh \
 	     test-offset-loop.bz2 test-offset-loop.alt.bz2 \
@@ -433,6 +456,7 @@ EXTRA_DIST = run-arextract.sh run-arsymtest.sh run-ar.sh \
 	     run-typeiter.sh testfile59.bz2 \
 	     run-readelf-d.sh testlib_dynseg.so.bz2 \
 	     run-readelf-Dd.sh \
+	     run-readelf-lnames.sh testfile-lnames.bz2 \
 	     testfile-s390x-hash-both.bz2 \
 	     run-readelf-gdb_index.sh testfilegdbindex5.bz2 \
 	     testfilegdbindex7.bz2 testfilegdbindex9.bz2 \
@@ -685,11 +709,19 @@ EXTRA_DIST = run-arextract.sh run-arsymtest.sh run-ar.sh \
 	     testfile-dwp-4-cu-index-overflow.dwp.bz2 \
 	     testfile-dwp-cu-index-overflow.source \
 	     testfile-define-file.bz2 \
-	     testfile-sysroot.tar.bz2 run-sysroot.sh run-debuginfod-seekable.sh
+	     testfile-sysroot.tar.bz2 run-sysroot.sh \
+	     run-test-manyfuncs.sh manyfuncs.c \
+	     run-debuginfod-seekable.sh thread-safety-subr.sh \
+	     run-eu-search-cfi.sh run-eu-search-macros.sh \
+	     run-eu-search-lines.sh run-eu-search-die.sh
 
 
+if USE_HELGRIND
+valgrind_cmd=valgrind -q --tool=helgrind --error-exitcode=1 --track-fds=yes
+else
 if USE_VALGRIND
-valgrind_cmd=valgrind -q --leak-check=full --error-exitcode=1
+valgrind_cmd=valgrind -q --leak-check=full --error-exitcode=1 --track-fds=yes
+endif
 endif
 
 
@@ -846,6 +878,7 @@ emptyfile_LDADD = $(libelf)
 vendorelf_LDADD = $(libelf)
 fillfile_LDADD = $(libelf)
 dwarf_default_lower_bound_LDADD = $(libdw)
+dwarf_language_lower_bound_LDADD = $(libdw)
 dwarf_die_addr_die_LDADD = $(libdw)
 get_units_invalid_LDADD = $(libdw)
 get_units_split_LDADD = $(libdw)
@@ -866,12 +899,23 @@ nvidia_extended_linemap_libdw_LDADD = $(libelf) $(libdw)
 elf_print_reloc_syms_LDADD = $(libelf)
 cu_dwp_section_info_LDADD = $(libdw)
 declfiles_LDADD = $(libdw)
+eu_search_cfi_LDFLAGS = -pthread $(AM_LDFLAGS)
+eu_search_macros_LDFLAGS = -pthread $(AM_LDFLAGS)
+eu_search_lines_LDFLAGS = -pthread $(AM_LDFLAGS)
+eu_search_die_LDFLAGS = -pthread $(AM_LDFLAGS)
+eu_search_cfi_LDADD = $(libeu) $(libelf) $(libdw)
+eu_search_macros_LDADD = $(libdw)
+eu_search_lines_LDADD = $(libdw) $(libelf)
+eu_search_die_LDADD = $(libdw)
+
+test_manyfuncs_LDADD = $(libelf)
+# Make sure the manyfunc.o test object is generated before test-manyfuncs
+EXTRA_test_manyfuncs_DEPENDENCIES = manyfuncs.o
 
 # We want to test the libelf headers against the system elf.h header.
 # Don't include any -I CPPFLAGS. Except when we install our own elf.h.
 # For the gelf test we do want our own libelf.h, but nothing else.
 BUILT_SOURCES = libelf.h
-CLEANFILES += libelf.h
 libelf.h: $(top_srcdir)/libelf/libelf.h
 	ln -s $< $@
 if !INSTALL_ELFH
@@ -885,11 +929,11 @@ system_elf_libelf_test_LDADD = $(libelf)
 system_elf_gelf_test_LDADD = $(libelf)
 
 # A lock file used to make sure only one test dumps core at a time
-CLEANFILES += core-dump-backtrace.lock
+MOSTLYCLEANFILES = core-dump-backtrace.lock
+CLEANFILES = $(BUILT_SOURCES) manyfuncs.o
 
 if GCOV
 check: check-am coverage
-.PHONY: coverage
 coverage:
 	-$(srcdir)/coverage.sh
 endif

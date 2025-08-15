@@ -179,6 +179,8 @@ __libdw_intern_next_unit (Dwarf *dbg, bool debug_types)
   eu_search_tree_init (&newp->locs_tree);
   rwlock_init (newp->abbrev_lock);
   rwlock_init (newp->split_lock);
+  mutex_init (newp->src_lock);
+  mutex_init (newp->str_off_base_lock);
 
   /* v4 debug type units have version == 4 and unit_type == DW_UT_type.  */
   if (debug_types)
@@ -238,6 +240,8 @@ struct Dwarf_CU *
 internal_function
 __libdw_findcu (Dwarf *dbg, Dwarf_Off start, bool v4_debug_types)
 {
+  mutex_lock (dbg->dwarf_lock);
+
   search_tree *tree = v4_debug_types ? &dbg->tu_tree : &dbg->cu_tree;
   Dwarf_Off *next_offset
     = v4_debug_types ? &dbg->next_tu_offset : &dbg->next_cu_offset;
@@ -247,9 +251,10 @@ __libdw_findcu (Dwarf *dbg, Dwarf_Off start, bool v4_debug_types)
   struct Dwarf_CU **found = eu_tfind (&fake, tree, findcu_cb);
   struct Dwarf_CU *result = NULL;
   if (found != NULL)
-    return *found;
-
-  rwlock_wrlock (dbg->dwarf_lock);
+    {
+      mutex_unlock (dbg->dwarf_lock);
+      return *found;
+    }
 
   if (start < *next_offset)
     __libdw_seterrno (DWARF_E_INVALID_DWARF);
@@ -276,7 +281,7 @@ __libdw_findcu (Dwarf *dbg, Dwarf_Off start, bool v4_debug_types)
 	}
     }
 
-  rwlock_unlock (dbg->dwarf_lock);
+  mutex_unlock (dbg->dwarf_lock);
   return result;
 }
 

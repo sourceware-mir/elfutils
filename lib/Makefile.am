@@ -39,6 +39,14 @@ libeu_a_SOURCES = xasprintf.c xstrdup.c xstrndup.c xmalloc.c next_prime.c \
 
 noinst_HEADERS = fixedsizehash.h libeu.h system.h dynamicsizehash.h list.h \
 		 eu-config.h color.h printversion.h bpf.h \
-		 atomics.h stdatomic-fbsd.h dynamicsizehash_concurrent.h \
+		 dynamicsizehash_concurrent.h \
 		 eu-search.h locks.h
+
 EXTRA_DIST = dynamicsizehash.c dynamicsizehash_concurrent.c
+
+EXTRA_libeu_a_DEPENDENCIES = libeu.manifest
+
+libeu.manifest: $(libeu_a_OBJECTS)
+	$(AM_V_GEN)echo $^ > $@
+
+CLEANFILES = $(EXTRA_libeu_a_DEPENDENCIES)

@@ -264,9 +264,13 @@ struct Dwarf
      allocations for this Dwarf.  */
   pthread_rwlock_t mem_rwl;
 
-  /* The dwarf_lock is a read-write lock designed to ensure thread-safe access
-     and modification of an entire Dwarf object.  */
-  rwlock_define(, dwarf_lock);
+  /* Recursive mutex intended for setting/getting alt_dwarf, next_tu_offset,
+     and next_cu_offset.  Should be held when calling
+     __libdw_intern_next_unit.  */
+  mutex_define(, dwarf_lock);
+
+  /* Synchronize access to dwarf_macro_getsrcfiles.  */
+  mutex_define(, macro_lock);
 
   /* Internal memory handling.  This is basically a simplified thread-local
      reimplementation of obstacks.  Unfortunately the standard obstack
@@ -452,11 +456,20 @@ struct Dwarf_CU
   Dwarf_Off locs_base;
 
   /* Synchronize access to the abbrev member of a Dwarf_Die that
-     refers to this Dwarf_CU.  */
+     refers to this Dwarf_CU.  Covers __libdw_die_abbrev. */
   rwlock_define(, abbrev_lock);
 
-  /* Synchronize access to the split member of this Dwarf_CU.  */
+  /* Synchronize access to the split member of this Dwarf_CU.
+     Covers __libdw_find_split_unit.  */
   rwlock_define(, split_lock);
+
+  /* Synchronize access to the lines and files members.
+     Covers dwarf_getsrclines and dwarf_getsrcfiles.  */
+  mutex_define(, src_lock);
+
+  /* Synchronize access to the str_off_base of this Dwarf_CU.
+     Covers __libdw_str_offsets_base_off.  */
+  mutex_define(, str_off_base_lock);
 
   /* Memory boundaries of this CU.  */
   void *startp;
@@ -496,6 +509,8 @@ INTDECL (dwarf_hasattr)
 INTDECL (dwarf_haschildren)
 INTDECL (dwarf_haspc)
 INTDECL (dwarf_highpc)
+INTDECL (dwarf_language)
+INTDECL (dwarf_language_lower_bound)
 INTDECL (dwarf_lowpc)
 INTDECL (dwarf_nextcu)
 INTDECL (dwarf_next_unit)
@@ -795,8 +810,7 @@ extern Dwarf_Abbrev *__libdw_findabbrev (struct Dwarf_CU *cu,
 
 /* Get abbreviation at given offset.  */
 extern Dwarf_Abbrev *__libdw_getabbrev (Dwarf *dbg, struct Dwarf_CU *cu,
-					Dwarf_Off offset, size_t *lengthp,
-					Dwarf_Abbrev *result)
+					Dwarf_Off offset, size_t *lengthp)
      __nonnull_attribute__ (1) internal_function;
 
 /* Get abbreviation of given DIE, and optionally set *READP to the DIE memory
@@ -1200,6 +1214,7 @@ str_offsets_base_off (Dwarf *dbg, Dwarf_CU *cu)
   Dwarf_Off off = 0;
   if (cu != NULL)
     {
+      mutex_lock (cu->str_off_base_lock);
       if (cu->str_off_base == (Dwarf_Off) -1)
 	{
 	  Dwarf_Off dwp_offset;
@@ -1214,6 +1229,7 @@ str_offsets_base_off (Dwarf *dbg, Dwarf_CU *cu)
 	      if (dwarf_formudata (&attr, &base) == 0)
 		{
 		  cu->str_off_base = off + base;
+		  mutex_unlock (cu->str_off_base_lock);
 		  return cu->str_off_base;
 		}
 	    }
@@ -1221,6 +1237,7 @@ str_offsets_base_off (Dwarf *dbg, Dwarf_CU *cu)
 	  if (cu->version < 5)
 	    {
 	      cu->str_off_base = off;
+	      mutex_unlock (cu->str_off_base_lock);
 	      return cu->str_off_base;
 	    }
 
@@ -1228,7 +1245,10 @@ str_offsets_base_off (Dwarf *dbg, Dwarf_CU *cu)
 	    dbg = cu->dbg;
 	}
       else
-	return cu->str_off_base;
+	{
+	  mutex_unlock (cu->str_off_base_lock);
+	  return cu->str_off_base;
+	}
     }
 
   /* No str_offsets_base attribute, we have to assume "zero".
@@ -1278,7 +1298,10 @@ str_offsets_base_off (Dwarf *dbg, Dwarf_CU *cu)
 
  no_header:
   if (cu != NULL)
-    cu->str_off_base = off;
+    {
+      cu->str_off_base = off;
+      mutex_unlock (cu->str_off_base_lock);
+    }
 
   return off;
 }

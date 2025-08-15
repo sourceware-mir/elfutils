@@ -2,7 +2,7 @@
 ##
 ## Process this file with automake to create Makefile.in
 ##
-## Copyright (C) 2005-2010, 2013 Red Hat, Inc.
+## Copyright (C) 2005-2010, 2013, 2025 Red Hat, Inc.
 ## This file is part of elfutils.
 ##
 ## This file is free software; you can redistribute it and/or modify
@@ -31,7 +31,8 @@
 ##
 include $(top_srcdir)/config/eu.am
 AM_CPPFLAGS += -I$(srcdir) -I$(srcdir)/../libelf -I$(srcdir)/../libebl \
-	   -I$(srcdir)/../libdw -I$(srcdir)/../libdwelf -I$(builddir)/../debuginfod
+	   -I$(srcdir)/../libdw -I$(srcdir)/../libdwelf -I$(builddir)/../debuginfod \
+	   -I$(srcdir)/../libdwfl_stacktrace
 VERSION = 1
 
 noinst_LIBRARIES = libdwfl.a
@@ -94,4 +95,10 @@ am_libdwfl_pic_a_OBJECTS = $(libdwfl_a_SOURCES:.c=.os)
 
 noinst_HEADERS = libdwflP.h
 
-CLEANFILES += $(am_libdwfl_pic_a_OBJECTS)
+EXTRA_libdwfl_a_DEPENDENCIES = libdwfl.manifest
+
+libdwfl.manifest: $(libdwfl_a_OBJECTS)
+	$(AM_V_GEN)echo $^ > $@
+
+MOSTLYCLEANFILES = $(am_libdwfl_a_OBJECTS) $(am_libdwfl_pic_a_OBJECTS)
+CLEANFILES = $(EXTRA_libdwfl_a_DEPENDENCIES)

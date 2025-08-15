@@ -81,6 +81,7 @@ extern "C" {
 #include <math.h>
 #include <float.h>
 #include <fnmatch.h>
+#include <arpa/inet.h>
 
 
 /* If fts.h is included before config.h, its indirect inclusions may not
@@ -448,6 +449,8 @@ static const struct argp_option options[] =
    { "include", 'I', "REGEX", 0, "Include files matching REGEX, default=all.", 0 },
    { "exclude", 'X', "REGEX", 0, "Exclude files matching REGEX, default=none.", 0 },
    { "port", 'p', "NUM", 0, "HTTP port to listen on, default 8002.", 0 },
+#define ARGP_KEY_CORS 0x1000
+   { "cors", ARGP_KEY_CORS, NULL, 0, "Add CORS response headers to HTTP queries, default no.", 0 },
    { "database", 'd', "FILE", 0, "Path to sqlite database.", 0 },
    { "ddl", 'D', "SQL", 0, "Apply extra sqlite ddl/pragma to connection.", 0 },
    { "verbose", 'v', NULL, 0, "Increase verbosity.", 0 },
@@ -479,6 +482,8 @@ static const struct argp_option options[] =
 #define ARGP_KEY_METADATA_MAXTIME 0x100C
    { "metadata-maxtime", ARGP_KEY_METADATA_MAXTIME, "SECONDS", 0,
      "Number of seconds to limit metadata query run time, 0=unlimited.", 0 },
+#define ARGP_KEY_HTTP_ADDR 0x100D
+   { "listen-address", ARGP_KEY_HTTP_ADDR, "ADDR", 0, "HTTP address to listen on.", 0 },
    { NULL, 0, NULL, 0, NULL, 0 },
   };
 
@@ -510,6 +515,9 @@ static volatile sig_atomic_t sigusr1 = 0;
 static volatile sig_atomic_t forced_groom_count = 0;
 static volatile sig_atomic_t sigusr2 = 0;
 static unsigned http_port = 8002;
+static struct sockaddr_in6 http_sockaddr;
+static string addr_info = "";
+static bool webapi_cors = false;
 static unsigned rescan_s = 300;
 static unsigned groom_s = 86400;
 static bool maxigroom = false;
@@ -613,6 +621,9 @@ parse_opt (int key, char *arg,
     case 'p': http_port = (unsigned) atoi(arg);
       if (http_port == 0 || http_port > 65535)
         argp_failure(state, 1, EINVAL, "port number");
+      break;
+    case ARGP_KEY_CORS:
+      webapi_cors = true;
       break;
     case 'F': scan_files = true; break;
     case 'R':
@@ -747,6 +758,16 @@ parse_opt (int key, char *arg,
       requires_koji_sigcache_mapping = true;
       break;
 #endif
+    case ARGP_KEY_HTTP_ADDR:
+      if (inet_pton(AF_INET, arg, &(((sockaddr_in*)&http_sockaddr)->sin_addr)) == 1)
+          http_sockaddr.sin6_family = AF_INET;
+      else
+          if (inet_pton(AF_INET6, arg, &http_sockaddr.sin6_addr) == 1)
+              http_sockaddr.sin6_family = AF_INET6;
+          else
+              argp_failure(state, 1, EINVAL, "listen-address");
+      addr_info = arg;
+      break;
       // case 'h': argp_state_help (state, stderr, ARGP_HELP_LONG|ARGP_HELP_EXIT_OK);
     default: return ARGP_ERR_UNKNOWN;
     }
@@ -2481,15 +2502,16 @@ extract_from_seekable_archive (const string& srcpath,
 }
 #else
 static bool
-is_seekable_archive (const string& rps, struct archive* a)
+is_seekable_archive (const string& rps __attribute__ ((unused)),
+		     struct archive* a __attribute__ ((unused)))
 {
   return false;
 }
 static int
-extract_from_seekable_archive (const string& srcpath,
-                               char* tmppath,
-                               uint64_t offset,
-                               uint64_t size)
+extract_from_seekable_archive (const string& srcpath __attribute__ ((unused)),
+                               char* tmppath __attribute__ ((unused)),
+                               uint64_t offset __attribute__ ((unused)),
+                               uint64_t size __attribute__ ((unused)))
 {
   return -1;
 }
@@ -3785,6 +3807,23 @@ handle_root (off_t* size)
 }
 
 
+static struct MHD_Response*
+handle_options (off_t* size)
+{
+  static char empty_body[] = " ";
+  MHD_Response* r = MHD_create_response_from_buffer (1, empty_body,
+                                                     MHD_RESPMEM_PERSISTENT);
+  if (r != NULL)
+    {
+      *size = 1;
+      add_mhd_response_header (r, "Access-Control-Allow-Origin", "*");
+      add_mhd_response_header (r, "Access-Control-Allow-Methods", "GET, OPTIONS");
+      add_mhd_response_header (r, "Access-Control-Allow-Headers", "cache-control");
+    }
+  return r;
+}
+
+
 ////////////////////////////////////////////////////////////////////////
 
 
@@ -3838,8 +3877,17 @@ handler_cb (void * /*cls*/,
 
   try
     {
-      if (string(method) != "GET")
-        throw reportable_exception(400, "we support GET only");
+      if (webapi_cors && method == string("OPTIONS"))
+        {
+          inc_metric("http_requests_total", "type", method);
+          r = handle_options(& http_size);
+          rc = MHD_queue_response (connection, MHD_HTTP_OK, r);
+          http_code = MHD_HTTP_OK;
+          MHD_destroy_response (r);
+          return rc;
+        }
+      else if (string(method) != "GET")
+        throw reportable_exception(400, "we support OPTIONS+GET only");
 
       /* Start decoding the URL. */
       size_t slash1 = url_copy.find('/', 1);
@@ -3887,7 +3935,7 @@ handler_cb (void * /*cls*/,
 
           // get the resulting fd so we can report its size
           int fd;
-          r = handle_buildid(connection, buildid, artifacttype, suffix, &fd);
+          r = handle_buildid (connection, buildid, artifacttype, suffix, &fd);
           if (r)
             {
               struct stat fs;
@@ -3934,6 +3982,9 @@ handler_cb (void * /*cls*/,
           throw reportable_exception(406, "File too large, max size=" + std::to_string(maxsize));
         }
 
+      if (webapi_cors)
+        // add ACAO header for all successful requests
+        add_mhd_response_header (r, "Access-Control-Allow-Origin", "*");
       rc = MHD_queue_response (connection, MHD_HTTP_OK, r);
       http_code = MHD_HTTP_OK;
       MHD_destroy_response (r);
@@ -4023,6 +4074,7 @@ dwarf_extract_source_paths (Elf *elf, set<string>& debug_sourcefiles)
             {
               string artifacttype = "debuginfo";
               r = handle_buildid (0, buildid, artifacttype, "", &alt_fd);
+              // NB: no need for ACAO etc. headers; this is not getting sent to a client 
             }
           catch (const reportable_exception& e)
             {
@@ -5559,6 +5611,8 @@ main (int argc, char *argv[])
   fdcache_prefetch = 64; // guesstimate storage is this much less costly than re-decompression
 
   /* Parse and process arguments.  */
+  memset(&http_sockaddr, 0, sizeof(http_sockaddr));
+  http_sockaddr.sin6_family = AF_UNSPEC;
   int remaining;
   (void) argp_parse (&argp, argc, argv, ARGP_IN_ORDER, &remaining, NULL);
   if (remaining != argc)
@@ -5665,48 +5719,75 @@ main (int argc, char *argv[])
 #endif
 			    | MHD_USE_DEBUG); /* report errors to stderr */
 
-  // Start httpd server threads.  Use a single dual-homed pool.
-  MHD_Daemon *d46 = MHD_start_daemon (mhd_flags, http_port,
-				      NULL, NULL, /* default accept policy */
-				      handler_cb, NULL, /* handler callback */
-				      MHD_OPTION_EXTERNAL_LOGGER,
-				      error_cb, NULL,
-				      MHD_OPTION_THREAD_POOL_SIZE,
-				      (int)connection_pool,
-				      MHD_OPTION_END);
+  MHD_Daemon *dsa = NULL,
+	     *d4 = NULL,
+	     *d46 = NULL;
 
-  MHD_Daemon *d4 = NULL;
-  if (d46 == NULL)
+  if (http_sockaddr.sin6_family != AF_UNSPEC)
     {
-      // Cannot use dual_stack, use ipv4 only
-      mhd_flags &= ~(MHD_USE_DUAL_STACK);
-      d4 = MHD_start_daemon (mhd_flags, http_port,
-			     NULL, NULL, /* default accept policy */
+      if (http_sockaddr.sin6_family == AF_INET)
+	((sockaddr_in*)&http_sockaddr)->sin_port = htons(http_port);
+      if (http_sockaddr.sin6_family == AF_INET6)
+	http_sockaddr.sin6_port = htons(http_port);
+      // Start httpd server threads on socket addr:port.
+      dsa = MHD_start_daemon (mhd_flags & ~MHD_USE_DUAL_STACK, http_port,
+			      NULL, NULL, /* default accept policy */
 			     handler_cb, NULL, /* handler callback */
 			     MHD_OPTION_EXTERNAL_LOGGER,
 			     error_cb, NULL,
-			     (connection_pool
-			      ? MHD_OPTION_THREAD_POOL_SIZE
-			      : MHD_OPTION_END),
-			     (connection_pool
-			      ? (int)connection_pool
-			      : MHD_OPTION_END),
+			     MHD_OPTION_SOCK_ADDR,
+			     (struct sockaddr *) &http_sockaddr,
+			     MHD_OPTION_THREAD_POOL_SIZE,
+			     (int)connection_pool,
 			     MHD_OPTION_END);
-      if (d4 == NULL)
-	{
-	  sqlite3 *database = db;
-	  sqlite3 *databaseq = dbq;
-	  db = dbq = 0; // for signal_handler not to freak
-	  sqlite3_close (databaseq);
-	  sqlite3_close (database);
-	  error (EXIT_FAILURE, 0, "cannot start http server at port %d",
-		 http_port);
-	}
-
     }
-  obatched(clog) << "started http server on"
-                 << (d4 != NULL ? " IPv4 " : " IPv4 IPv6 ")
-                 << "port=" << http_port << endl;
+  else
+    {
+      // Start httpd server threads.  Use a single dual-homed pool.
+      d46 = MHD_start_daemon (mhd_flags, http_port,
+			      NULL, NULL, /* default accept policy */
+			      handler_cb, NULL, /* handler callback */
+			      MHD_OPTION_EXTERNAL_LOGGER,
+			      error_cb, NULL,
+			      MHD_OPTION_THREAD_POOL_SIZE,
+			      (int)connection_pool,
+			      MHD_OPTION_END);
+      addr_info = "IPv4 IPv6";
+      if (d46 == NULL)
+	{
+	  // Cannot use dual_stack, use ipv4 only
+	  mhd_flags &= ~(MHD_USE_DUAL_STACK);
+	  d4 = MHD_start_daemon (mhd_flags, http_port,
+				 NULL, NULL, /* default accept policy */
+				 handler_cb, NULL, /* handler callback */
+				 MHD_OPTION_EXTERNAL_LOGGER,
+				 error_cb, NULL,
+				 (connection_pool
+				  ? MHD_OPTION_THREAD_POOL_SIZE
+				  : MHD_OPTION_END),
+				 (connection_pool
+				  ? (int)connection_pool
+				  : MHD_OPTION_END),
+				 MHD_OPTION_END);
+	  addr_info = "IPv4";
+	}
+    }
+  if (d4 == NULL && d46 == NULL && dsa == NULL)
+    {
+      sqlite3 *database = db;
+      sqlite3 *databaseq = dbq;
+      db = dbq = 0; // for signal_handler not to freak
+      sqlite3_close (databaseq);
+      sqlite3_close (database);
+      error (EXIT_FAILURE, 0, "cannot start http server on %s port %d",
+	     addr_info.c_str(), http_port);
+    }
+
+  obatched(clog) << "started http server on "
+		 << addr_info
+		 << " port=" << http_port
+		 << (webapi_cors ? " with cors" : "")
+		 << endl;
 
   // add maxigroom sql if -G given
   if (maxigroom)
@@ -5830,6 +5911,7 @@ main (int argc, char *argv[])
     pthread_join (it, NULL);
 
   /* Stop all the web service threads. */
+  if (dsa) MHD_stop_daemon (dsa);
   if (d46) MHD_stop_daemon (d46);
   if (d4) MHD_stop_daemon (d4);
 

@@ -125,8 +125,14 @@ uninstall: uninstall-am
 endif
 
 EXTRA_DIST = libdebuginfod.map
-MOSTLYCLEANFILES = $(am_libdebuginfod_pic_a_OBJECTS) $(LIBDEBUGINFOD_SONAME)
-CLEANFILES += $(am_libdebuginfod_pic_a_OBJECTS) libdebuginfod.so
+
+EXTRA_libdebuginfod_a_DEPENDENCIES = libdebuginfod.manifest
+
+libdebuginfod.manifest: $(libdebuginfod_a_OBJECTS)
+	$(AM_V_GEN)echo $^ > $@
+
+MOSTLYCLEANFILES = $(am_libdebuginfod_a_OBJECTS) $(am_libdebuginfod_pic_a_OBJECTS) $(LIBDEBUGINFOD_SONAME)
+CLEANFILES = libdebuginfod.so $(EXTRA_libdebuginfod_a_DEPENDENCIES)
 
 # automake std-options override: arrange to pass LD_LIBRARY_PATH
 installcheck-binPROGRAMS: $(bin_PROGRAMS)
