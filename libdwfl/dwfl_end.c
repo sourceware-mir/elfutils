@@ -48,6 +48,7 @@ dwfl_end (Dwfl *dwfl)
   free (dwfl->lookup_addr);
   free (dwfl->lookup_module);
   free (dwfl->lookup_segndx);
+  free (dwfl->sysroot);
 
   Dwfl_Module *next = dwfl->modulelist;
   while (next != NULL)

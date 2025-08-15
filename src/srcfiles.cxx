@@ -78,7 +78,9 @@ ARGP_PROGRAM_VERSION_HOOK_DEF = print_version;
 /* Bug report address.  */
 ARGP_PROGRAM_BUG_ADDRESS_DEF = PACKAGE_BUGREPORT;
 
+#ifdef HAVE_LIBARCHIVE
 constexpr size_t BUFFER_SIZE = 8192;
+#endif
 
 /* Definitions of arguments for argp functions.  */
 static const struct argp_option options[] =
@@ -347,9 +349,9 @@ void zip_files()
         else
             cerr << "Error: Invalid build ID length (" << bits_length << ")." << endl;
     }
-    #endif
 
     if (!no_backup)
+    #endif /* ENABLE_LIBDEBUGINFOD */
       /* Files could not be located using debuginfod, search locally */
       if (fd < 0)
         fd = open(file_path.c_str(), O_RDONLY);
