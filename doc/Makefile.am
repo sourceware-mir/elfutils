@@ -56,21 +56,43 @@ notrans_dist_man3_MANS= elf32_checksum.3 \
 			elf_errmsg.3 \
 			elf_errno.3 \
 			elf_fill.3 \
+			elf_flagelf.3 \
+			elf_flagehdr.3 \
+			elf_flagphdr.3 \
+			elf_flagscn.3 \
+			elf_flagdata.3 \
+			elf_flagshdr.3 \
 			elf_getarhdr.3 \
 			elf_getaroff.3 \
 			elf_getarsym.3 \
 			elf_getbase.3 \
 			elf_getdata.3 \
+			elf_getdata_rawchunk.3 \
+			elf_getident.3 \
+			elf_getphdrnum.3 \
 			elf_getscn.3 \
+			elf_getshdrnum.3 \
+			elf_getshdrstrndx.3 \
+			elf_getshnum.3 \
+			elf_getshstrndx.3 \
 			elf_hash.3 \
+			elf_gnu_hash.3 \
 			elf_kind.3 \
+			elf_memory.3 \
 			elf_ndxscn.3 \
+			elf_newdata.3 \
+			elf_newscn.3 \
+			elf_next.3 \
 			elf_nextscn.3 \
+			elf_rand.3 \
+			elf_rawdata.3 \
 			elf_rawfile.3 \
 			elf_scnshndx.3 \
 			elf_strptr.3 \
 			elf_update.3 \
 			elf_version.3 \
+			gelf_getclass.3 \
+			gelf_getehdr.3 \
 			libelf.3
 
 # libdebuginfod man pages (also notrans)
