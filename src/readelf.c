@@ -2874,8 +2874,9 @@ process_symtab (Ebl *ebl, unsigned int nsyms, Elf64_Word idx,
         xndx = sym->st_shndx;
       if (use_dynamic_segment == true)
 	{
-	  if (validate_str (symstr_data->d_buf, sym->st_name,
-			    symstr_data->d_size))
+	  if (symstr_data != NULL
+	      && validate_str (symstr_data->d_buf, sym->st_name,
+			       symstr_data->d_size))
 	    sym_name = (char *)symstr_data->d_buf + sym->st_name;
 	  else
 	    sym_name = NULL;
@@ -5722,13 +5723,10 @@ compare_listptr (const void *a, const void *b)
 		 _("%s %#" PRIx64 " used with different offset sizes"),
 		 name, (uint64_t) p1->offset);
 	}
-      if (listptr_base (p1) != listptr_base (p2))
-	{
-	  p1->warned = p2->warned = true;
-	  error (0, 0,
-		 _("%s %#" PRIx64 " used with different base addresses"),
-		 name, (uint64_t) p1->offset);
-	}
+
+      /* Note: CUs can share the same listptr_base.  So we don't check
+	 (listptr_base (p1) != listptr_base (p2)) */
+
       if (p1->attr != p2 ->attr)
 	{
 	  p1->warned = p2->warned = true;
@@ -6053,7 +6051,13 @@ print_debug_addr_section (Dwfl_Module *dwflmod __attribute__ ((unused)),
 
       fprintf (out, "Table at offset %" PRIx64 " ", off);
 
-      struct listptr *listptr = get_listptr (&known_addrbases, idx++);
+      /* Find the first CU that could plausibly be associated with
+	 this address base offset. Skip CUs that point their addr_base
+	 before this table.  */
+      struct listptr *listptr = get_listptr (&known_addrbases, idx);
+      while (listptr != NULL && listptr->offset < off)
+	listptr = get_listptr (&known_addrbases, ++idx);
+
       const unsigned char *next_unitp;
 
       uint64_t unit_length;
@@ -6087,7 +6091,7 @@ print_debug_addr_section (Dwfl_Module *dwflmod __attribute__ ((unused)),
 	      version = 4;
 
 	      /* The addresses start here, but where do they end?  */
-	      listptr = get_listptr (&known_addrbases, idx);
+	      listptr = get_listptr (&known_addrbases, idx + 1);
 	      if (listptr == NULL)
 		next_unitp = readendp;
 	      else if (listptr->cu->version < 5)
@@ -8269,7 +8273,7 @@ attr_callback (Dwarf_Attribute *attrp, void *arg)
 		    valuestr = dwarf_filesrc (files, num, NULL, NULL);
 		    if (valuestr != NULL)
 		      {
-			char *filename = strrchr (valuestr, '/');
+			const char *filename = strrchr (valuestr, '/');
 			if (filename != NULL)
 			  valuestr = filename + 1;
 		      }
@@ -9033,7 +9037,7 @@ print_form_data (Dwarf *dbg, int form, const unsigned char *readp,
 		 Dwarf_Off str_offsets_base, FILE *out)
 {
   Dwarf_Word val;
-  unsigned char *endp;
+  const unsigned char *endp;
   Elf_Data *data;
   char *str;
   switch (form)
@@ -9530,7 +9534,7 @@ print_debug_line_section (Dwfl_Module *dwflmod, Ebl *ebl, GElf_Ehdr *ehdr,
 	{
 	  while (linep < lineendp && *linep != 0)
 	    {
-	      unsigned char *endp = memchr (linep, '\0', lineendp - linep);
+	      const unsigned char *endp = memchr (linep, '\0', lineendp - linep);
 	      if (unlikely (endp == NULL))
 		goto invalid_unit;
 
@@ -9764,7 +9768,7 @@ print_debug_line_section (Dwfl_Module *dwflmod, Ebl *ebl, GElf_Ehdr *ehdr,
 		case DW_LNE_define_file:
 		  {
 		    char *fname = (char *) linep;
-		    unsigned char *endp = memchr (linep, '\0',
+		    const unsigned char *endp = memchr (linep, '\0',
 						  lineendp - linep);
 		    if (unlikely (endp == NULL))
 		      goto invalid_unit;
@@ -11402,7 +11406,13 @@ print_debug_str_offsets_section (Dwfl_Module *dwflmod __attribute__ ((unused)),
 
       fprintf (out, "Table at offset %" PRIx64 " ", off);
 
-      struct listptr *listptr = get_listptr (&known_stroffbases, idx++);
+      /* Find the first CU that could plausibly be associated with
+	 this string offsets index. Skip CUs that point
+	 str_offsets_base before this table.  */
+      struct listptr *listptr = get_listptr (&known_stroffbases, idx);
+      while (listptr != NULL && listptr->offset < off)
+	listptr = get_listptr (&known_stroffbases, ++idx);
+
       const unsigned char *next_unitp = readendp;
       uint8_t offset_size;
       bool has_header;
@@ -11724,7 +11734,7 @@ print_debug_exception_table (Dwfl_Module *dwflmod __attribute__ ((unused)),
   while (readp < action_table)
     {
       if (u == 0)
-	fputs (_("\n Call site table:"), out);
+	fputs (_("\n Call site table:\n"), out);
 
       uint64_t call_site_start;
       readp = read_encoded (call_site_encoding, readp, dataend,
@@ -11752,7 +11762,7 @@ print_debug_exception_table (Dwfl_Module *dwflmod __attribute__ ((unused)),
   unsigned int max_ar_filter = 0;
   if (max_action > 0)
     {
-      fputs ("\n Action table:", out);
+      fputs ("\n Action table:\n", out);
 
       size_t maxdata = (size_t) (dataend - action_table);
       if (max_action > maxdata || maxdata - max_action < 1)
@@ -11783,7 +11793,7 @@ print_debug_exception_table (Dwfl_Module *dwflmod __attribute__ ((unused)),
 	  if (abs (ar_disp) & 1)
 	    fprintf (out, " -> [%4u]\n", u + (ar_disp + 1) / 2);
 	  else if (ar_disp != 0)
-	    fputs (" -> ???", out);
+	    fputs (" -> ???\n", out);
 	  else
 	    fputc ('\n', out);
 	  ++u;
@@ -11794,7 +11804,7 @@ print_debug_exception_table (Dwfl_Module *dwflmod __attribute__ ((unused)),
   if (max_ar_filter > 0 && ttype_base != NULL)
     {
       unsigned char dsize;
-      fputs ("\n TType table:", out);
+      fputs ("\n TType table:\n", out);
 
       // XXX Not *4, size of encoding;
       switch (ttype_encoding & 7)
@@ -12200,7 +12210,8 @@ getone_dwflmod (Dwfl_Module *dwflmod,
   return DWARF_CB_OK;
 }
 
-typedef struct {
+typedef struct Job_Data {
+  struct Job_Data *next;
   Dwfl_Module *dwflmod;
   Ebl *ebl;
   GElf_Ehdr *ehdr;
@@ -12230,7 +12241,7 @@ do_job (void *data, FILE *out)
    If thread safety is not supported or the maximum number of threads is set
    to 1, then immediately call START_ROUTINE with the given arguments.  */
 static void
-schedule_job (job_data jdata[], size_t idx,
+schedule_job (job_data **jdatalist,
 	      void (*start_routine) (Dwfl_Module *, Ebl *, GElf_Ehdr *,
 				     Elf_Scn *, GElf_Shdr *, Dwarf *, FILE *),
 	      Dwfl_Module *dwflmod, Ebl *ebl, GElf_Ehdr *ehdr, Elf_Scn *scn,
@@ -12239,21 +12250,24 @@ schedule_job (job_data jdata[], size_t idx,
 #ifdef USE_LOCKS
   if (max_threads > 1)
     {
-      /* Add to the job queue.  */
-      jdata[idx].dwflmod = dwflmod;
-      jdata[idx].ebl = ebl;
-      jdata[idx].ehdr = ehdr;
-      jdata[idx].scn = *scn;
-      jdata[idx].shdr = *shdr;
-      jdata[idx].dbg = dbg;
-      jdata[idx].fp = start_routine;
+      job_data *jdata = xmalloc (sizeof (job_data));
 
-      add_job (do_job, (void *) &jdata[idx]);
+      jdata->dwflmod = dwflmod;
+      jdata->ebl = ebl;
+      jdata->ehdr = ehdr;
+      jdata->scn = *scn;
+      jdata->shdr = *shdr;
+      jdata->dbg = dbg;
+      jdata->fp = start_routine;
+      jdata->next = *jdatalist;
+      *jdatalist = jdata;
+
+      add_job (do_job, (void *) jdata);
     }
   else
     start_routine (dwflmod, ebl, ehdr, scn, shdr, dbg, stdout);
 #else
-  (void) jdata; (void) idx;
+  (void) jdatalist;
 
   start_routine (dwflmod, ebl, ehdr, scn, shdr, dbg, stdout);
 #endif
@@ -12431,8 +12445,7 @@ print_debug (Dwfl_Module *dwflmod, Ebl *ebl, GElf_Ehdr *ehdr)
   if (unlikely (elf_getshdrstrndx (ebl->elf, &shstrndx) < 0))
     error_exit (0, _("cannot get section header string table index"));
 
-  ssize_t num_jobs = 0;
-  job_data *jdata = NULL;
+  job_data *jdatalist = NULL;
 
   /* If the .debug_info section is listed as implicitly required then
      we must make sure to handle it before handling any other debug
@@ -12531,13 +12544,6 @@ print_debug (Dwfl_Module *dwflmod, Ebl *ebl, GElf_Ehdr *ehdr)
 	  if (name == NULL)
 	    continue;
 
-	  if (jdata == NULL)
-	    {
-	      jdata = calloc (ndebug_sections, sizeof (*jdata));
-	      if (jdata == NULL)
-		error_exit (0, _("failed to allocate job data"));
-	    }
-
 	  int n;
 	  for (n = 0; n < ndebug_sections; ++n)
 	    {
@@ -12561,10 +12567,9 @@ print_debug (Dwfl_Module *dwflmod, Ebl *ebl, GElf_Ehdr *ehdr)
 		{
 		  if (((print_debug_sections | implicit_debug_sections)
 		       & debug_sections[n].bitmask))
-		    schedule_job (jdata, num_jobs++, debug_sections[n].fp,
+		    schedule_job (&jdatalist, debug_sections[n].fp,
 				  dwflmod, ebl, ehdr, scn, shdr, dbg);
 
-		  assert (num_jobs <= ndebug_sections);
 		  break;
 		}
 	    }
@@ -12579,7 +12584,13 @@ print_debug (Dwfl_Module *dwflmod, Ebl *ebl, GElf_Ehdr *ehdr)
 
   dwfl_end (skel_dwfl);
   free (skel_name);
-  free (jdata);
+
+  while (jdatalist != NULL)
+    {
+      job_data *jdata = jdatalist;
+      jdatalist = jdatalist->next;
+      free (jdata);
+    }
 
   /* Turn implicit and/or explicit back on in case we go over another file.  */
   if (implicit_info)
